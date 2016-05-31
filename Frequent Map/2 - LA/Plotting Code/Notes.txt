@@ -1,0 +1,5 @@
+Missing optional file:
+
+PVPTA - shapes.txt
+Glendale - shapes.txt
+Torrance - shapes.txt

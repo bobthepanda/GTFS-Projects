@@ -1,0 +1,9 @@
+Missing required file:
+
+NJT Bus - calendar.txt
+LIRR - calendar.txt
+NJT Rail - calendar.txt
+
+Missing optional file:
+
+PATH - shapes.txt

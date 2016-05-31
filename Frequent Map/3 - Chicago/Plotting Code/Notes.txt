@@ -1,0 +1,7 @@
+Missing optional file:
+
+Pace - shapes.txt
+
+Data errors:
+
+Metra - shape_id doesn't match shapes.txt with trips.txt

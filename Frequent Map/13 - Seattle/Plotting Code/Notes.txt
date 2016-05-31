@@ -1,0 +1,3 @@
+Missing optional file:
+
+Seattle Childrens' Hopsital - missing shapes.txt

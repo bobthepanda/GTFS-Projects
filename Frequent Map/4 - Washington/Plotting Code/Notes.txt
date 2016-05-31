@@ -1,0 +1,7 @@
+Missing required file:
+
+WMATA - calendar.txt
+
+Data error:
+
+ART - having issues reading values in quotes from files
