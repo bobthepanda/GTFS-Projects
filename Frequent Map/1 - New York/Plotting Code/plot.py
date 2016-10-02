@@ -51,7 +51,7 @@ def getData(folderList, shapes, trips, stopTimes, calendar, frequencies):
         num_validshapes = trips[trips.shape_id.isin(shapes.shape_id)].groupby('route_id').size()
         num_missingshapes = num_shapes - num_validshapes
         percent_missingshapes = num_missingshapes / num_shapes * 100
-        print('Missing data from ' + ', '.join(folderList) + ':')
+        print('Missing data from ' + folder + ':')
         num_missingshapesList = num_missingshapes[num_missingshapes != 0]
         if num_missingshapes.empty:
             print(num_missingshapes[num_missingshapes != 0])
@@ -64,10 +64,17 @@ def getData(folderList, shapes, trips, stopTimes, calendar, frequencies):
 def getNumTrips(trips, stopTimes, calendar, frequencies):
     validFreq = pd.DataFrame()
 
-    # Grab the number of trips made outside min and max hour.
-    tooEarly = stopTimes['arrival_time'] < base_mintime
-    tooLate = stopTimes['departure_time'] > base_maxtime
-    invalidTrips = stopTimes[(tooEarly | tooLate)].groupby('trip_id').size()
+    # Only grab the first stop for every trip.
+    smallStopTimes = stopTimes.sort_values(['arrival_time']).groupby(['trip_id']).first().reset_index()[['trip_id', 'arrival_time']]
+    invalidTrips = pd.DataFrame()
+
+    # Grab the trips that are made outside the min and max times.
+    tooEarly = smallStopTimes['arrival_time'] < '{0:0>2}:00:00'.format(base_minhour)
+    tooLate = smallStopTimes['arrival_time'] > '{0:0>2}:00:00'.format(base_maxhour)
+    if base_minhour < base_maxhour:
+        invalidTrips = smallStopTimes[(tooEarly | tooLate)]
+    else:
+        invalidTrips = smallStopTimes[(tooEarly & tooLate)]
 
     # Add frequency information.
     if not frequencies.empty:
@@ -88,7 +95,7 @@ def getNumTrips(trips, stopTimes, calendar, frequencies):
 
         # Remove invalid trips that have valid entries in frequencies.txt.
         in_freq = invalidTrips.index.isin(validFreq.index)
-        print(invalidTrips[in_freq])
+        print(invalidTrips[in_freq]
         invalidTrips = invalidTrips[~in_freq]
 
     # Filter out the invalid trips.
