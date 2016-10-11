@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
+from time import time, sleep
 import numpy as np
 import pandas as pd
 import os.path
@@ -25,9 +26,12 @@ third_maxheadway = 30
 start_date = 20161002
 daysOfTheWeek = ['monday','tuesday','wednesday','thursday','friday', 'saturday', 'sunday']
 
+base_minhour = base_minhour % 24
+base_maxhour = base_maxhour % 24
+while base_maxhour <= base_minhour:
+    base_maxhour += 24
+
 base_hourspan = base_maxhour - base_minhour - 1
-if base_hourspan <= 0:
-    base_hourspan += 24
 
 base_trips = len(daysOfTheWeek) * (base_hourspan) * (60 / base_maxheadway)
 
@@ -39,62 +43,30 @@ timeData = ['arrival_time', 'departure_time', 'trip_id']
 stopData = ['stop_lon', 'stop_lat']
 calendarData = ['service_id'] + daysOfTheWeek
 calendarDateData = ['service_id', 'date']
+
 def getData(folder, shapes, trips, stopTimes, calendar):
+    print('Adding data from ' + folder + '.')
+
+    # Read the files from the data.
+    readShapes = pd.read_csv('../' + folder + '/shapes.txt')[shapeData]
+    readTrips = pd.read_csv('../' + folder + '/trips.txt')[routeData]
+    readStopTimes = pd.read_csv('../' + folder + '/stop_times.txt')[timeData]
+    readCalendar = pd.DataFrame()
     if os.path.isfile('../' + folder + '/calendar.txt'):
-        return getDataWithoutDates(folder, shapes, trips, stopTimes, calendar)
+        readCalendar = pd.read_csv('../' + folder + '/calendar.txt')[calendarData]
     else:
-        return getDataDates(folder, shapes, trips, stopTimes, calendar)
+        readCalendarDates = pd.read_csv('../' + folder + '/calendar_dates.txt')[calendarDateData]
+        calendarDates = readCalendarDates[(readCalendarDates.date >= start_date) & (readCalendarDates.date <= (start_date + 6))]
+        readCalendar = calendarDates.groupby(['service_id']).first().reset_index()[['service_id']]
+        for day in daysOfTheWeek:
+            readCalendar['day'] = 0
 
-def getDataWithoutDates(folder, shapes, trips, stopTimes, calendar):
-    print('Adding data from ' + folder + '.')
-
-    # Read the files from the data.
-    readShapes = pd.read_csv('../' + folder + '/shapes.txt')[shapeData]
-    readTrips = pd.read_csv('../' + folder + '/trips.txt')[routeData]
-    readStopTimes = pd.read_csv('../' + folder + '/stop_times.txt')[timeData]
-    readCalendar = pd.read_csv('../' + folder + '/calendar.txt')[calendarData]
-
-    # Append it to the existing data.
-    shapes = pd.concat([shapes, readShapes])
-    trips = pd.concat([trips, readTrips])
-    stopTimes = pd.concat([stopTimes, readStopTimes])
-    calendar = pd.concat([calendar, readCalendar])
-
-     # Calculate the number of missing shapes.
-    num_shapes = trips.groupby('route_id').size()
-    num_validshapes = trips[trips.shape_id.isin(shapes.shape_id)].groupby('route_id').size()
-    num_missingshapes = num_shapes - num_validshapes
-    percent_missingshapes = num_missingshapes / num_shapes * 100
-    print('Missing data from ' + folder + ':')
-    num_missingshapesList = num_missingshapes[num_missingshapes != 0]
-    if num_missingshapes.empty:
-        print(num_missingshapes[num_missingshapes != 0])
-        print(percent_missingshapes[percent_missingshapes != 0])
-    else:
-        print('No data missing.\n')
-
-    return lists(shapes, trips, stopTimes, calendar)
-
-def getDataDates(folder, shapes, trips, stopTimes, calendar):
-    print('Adding data from ' + folder + '.')
-
-    # Read the files from the data.
-    readShapes = pd.read_csv('../' + folder + '/shapes.txt')[shapeData]
-    readTrips = pd.read_csv('../' + folder + '/trips.txt')[routeData]
-    readStopTimes = pd.read_csv('../' + folder + '/stop_times.txt')[timeData]
-    readCalendarDates = pd.read_csv('../' + folder + '/calendar_dates.txt')[calendarDateData]
-
-    calendarDates = readCalendarDates[(readCalendarDates.date >= start_date) & (readCalendarDates.date <= (start_date + 6))]
-    readCalendar = calendarDates.groupby(['service_id']).first().reset_index()[['service_id']]
-    for day in daysOfTheWeek:
-        readCalendar['day'] = 0
-
-    dayNum = 0
-    while dayNum < len(daysOfTheWeek):
-    	currentDay = calendarDates[(calendarDates.date == (start_date + dayNum))]
-    	for row in readCalendar.itertuples():
-    		readCalendar.set_value(row.Index, daysOfTheWeek[dayNum], len(currentDay[(currentDay.service_id == row.service_id)].index))
-    	dayNum +=1
+        dayNum = 0
+        while dayNum < len(daysOfTheWeek):
+            currentDay = calendarDates[(calendarDates.date == (start_date + dayNum))]
+            for row in readCalendar.itertuples():
+                readCalendar.set_value(row.Index, daysOfTheWeek[dayNum], len(currentDay[(currentDay.service_id == row.service_id)].index))
+            dayNum +=1
 
     # Append it to the existing data.
     shapes = pd.concat([shapes, readShapes])
@@ -149,35 +121,26 @@ def getNumTrips(folder, trips, stopTimes, calendar):
     max_route_headway = -1.0
     max_route_weekday_headway = -1.0
     for row in numTrips.itertuples():
-        currentTripTimes = validTripTimes[(validTripTimes.shape_id == row.shape_id)]
-        currentRouteTripTimes = validTripTimes[(validTripTimes.route_id == row.route_id)]
+        currentTrips = validTripTimes[(validTripTimes.shape_id == row.shape_id)]
+        currentRouteTrips = validTripTimes[(validTripTimes.route_id == row.route_id)]
+        # print('Row data for ' + row.shape_id + ', ' + row.route_id)
+        # print(currentRouteTrips.sort_values(['sunday', 'arrival_time']))
         max_headway = -1
-        if row.route_id != last_route_id:
-            max_route_headway = -1.0
-            max_route_weekday_headway = -1.0
-        for day in daysOfTheWeek:
-            currentHour = base_minhour
-            currentTripTimesToday = currentTripTimes[[day, 'arrival_time']]
-            currentRouteTripTimesToday = currentRouteTripTimes[[day, 'arrival_time']]
 
-            base_maxhour_adjusted = base_maxhour
-            if base_maxhour_adjusted < base_minhour:
-                base_maxhour_adjusted += 24
+        for currentHour in range(base_minhour, base_maxhour):
+            beginHourString = '{0:0>2}:00:00'.format(currentHour % 24)
+            endHourString = '{0:0>2}:00:00'.format((currentHour % 24) +1)
 
-            while currentHour < base_maxhour_adjusted - 1:
-                beginHourString = '{0:0>2}:00:00'.format(currentHour % 24)
-                endHourString = '{0:0>2}:00:00'.format((currentHour % 24) +1)
+            currentTripsHour = currentTrips[(currentTrips.arrival_time >= beginHourString) & (currentTrips.arrival_time < endHourString)]
 
-                currentTrips = pd.DataFrame()
-                currentTrips = currentTripTimesToday[(currentTripTimesToday.arrival_time >= beginHourString) & (currentTripTimes.arrival_time < endHourString)][[day, 'arrival_time']]
+            if currentHour > 23:
+                beginHourString = '{0:0>2}:00:00'.format(currentHour)
+                endHourString = '{0:0>2}:00:00'.format((currentHour) +1)
 
-                if currentHour > 23:
-                    beginHourString = '{0:0>2}:00:00'.format(currentHour)
-                    endHourString = '{0:0>2}:00:00'.format((currentHour) +1)
+                currentTripsHour = currentTripsHour.append(currentTrips[(currentTrips.arrival_time >= beginHourString) & (currentTrips.arrival_time < endHourString)])
 
-                    currentTrips = currentTrips.append(currentTripTimesToday[(currentTripTimesToday.arrival_time >= beginHourString) & (currentTripTimes.arrival_time < endHourString)][[day, 'arrival_time']])
-
-                currentTripsNum = currentTrips.iloc[:,0].sum()
+            for day in daysOfTheWeek:
+                currentTripsNum = currentTripsHour[[day, 'arrival_time']].iloc[:,0].sum()
                 if currentTripsNum != 0:
                     headway = (60 * base_directions) / currentTripsNum
                     if headway > max_headway:
@@ -185,33 +148,37 @@ def getNumTrips(folder, trips, stopTimes, calendar):
                 else:
                     max_headway = 121
 
-                if row.route_id != last_route_id:
-                    currentRouteTrips = currentRouteTripTimesToday[(currentRouteTripTimesToday.arrival_time >= beginHourString) & (currentRouteTripTimes.arrival_time < endHourString)][[day, 'arrival_time']]
+        if row.route_id != last_route_id:
+            max_route_headway = -1.0
+            max_route_weekday_headway = -1.0
+            for currentHour in range(base_minhour, base_maxhour):
+                beginHourString = '{0:0>2}:00:00'.format(currentHour % 24)
+                endHourString = '{0:0>2}:00:00'.format((currentHour % 24) +1)
 
-                    if currentHour > 23:
-                        beginHourString = '{0:0>2}:00:00'.format(currentHour)
-                        endHourString = '{0:0>2}:00:00'.format((currentHour) +1)
+                currentRouteTripsHour = currentRouteTrips[(currentRouteTrips.arrival_time >= beginHourString) & (currentRouteTrips.arrival_time < endHourString)]
 
-                        currentRouteTrips = currentRouteTrips.append(currentRouteTripTimesToday[(currentRouteTripTimesToday.arrival_time >= beginHourString) & (currentRouteTripTimes.arrival_time < endHourString)][[day, 'arrival_time']])
+                if currentHour > 23:
+                    beginHourString = '{0:0>2}:00:00'.format(currentHour)
+                    endHourString = '{0:0>2}:00:00'.format((currentHour) +1)
 
-                    currentRouteTripsNum = currentRouteTrips.iloc[:,0].sum()
+                    currentRouteTripsHour = currentRouteTripsHour.append(currentRouteTrips[(currentRouteTrips.arrival_time >= beginHourString) & (currentRouteTrips.arrival_time < endHourString)])
+
+                for day in daysOfTheWeek:
+                    currentRouteTripsNum = currentRouteTripsHour[[day, 'arrival_time']].iloc[:,0].sum()
                     if currentRouteTripsNum != 0:
                         route_headway = (60 * base_directions) / currentRouteTripsNum
                         if route_headway > max_route_headway:
                             max_route_headway = route_headway
                         if day in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'] and route_headway > max_route_weekday_headway:
-                            print(row.route_id)
-                            print(currentRouteTripsNum)
-                            print(max_route_weekday_headway)
-                            print(route_headway)
                             max_route_weekday_headway = route_headway
-                            print()
+                    elif max_route_headway != 121:
+                        max_route_headway = 121
+                        if day in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']:
+                            max_route_weekday_headway = 121
                     else:
                         max_route_headway = 121
                         if day in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']:
                             max_route_weekday_headway = 121
-
-                currentHour += 1
 
         numTrips.set_value(row.Index, 'max_headway', max_headway)
         numTrips.set_value(row.Index, 'max_route_headway', max_route_headway)
@@ -295,10 +262,10 @@ def makeFrequentMap(fileName, railFolderList, busFolderList, width_height, lon, 
     plt.savefig(fileName, facecolor='white',edgecolor='white')
     #plt.show()
 
-# makeFrequentMap('new_york.png', ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'Westchester Data', 'Nassau Data', 'NJT Bus Data', 'SI Ferry Data'], 80000, -73.935242, 40.730610)
+makeFrequentMap('new_york.png', ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'Westchester Data', 'Nassau Data', 'NJT Bus Data', 'SI Ferry Data'], 80000, -73.935242, 40.730610)
 
-#makeFrequentMap('bronx.png', ['Subway Data', 'Metro North Data'], ['Bronx Data', 'Queens Data', 'Manhattan Data', 'MTA Bus Data', 'Westchester Data'], 20000, -73.886111, 40.837222)
-#makeFrequentMap('queens.png', ['Subway Data', 'LIRR Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'MTA Bus Data', 'Nassau Data'], 30000, -73.866667, 40.75)
+makeFrequentMap('bronx.png', ['Subway Data', 'Metro North Data'], ['Bronx Data', 'Queens Data', 'Manhattan Data', 'MTA Bus Data', 'Westchester Data', 'NJT Bus Data'], 20000, -73.886111, 40.837222)
+makeFrequentMap('queens.png', ['Subway Data', 'LIRR Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'MTA Bus Data', 'Nassau Data'], 30000, -73.866667, 40.75)
 makeFrequentMap('manhattan.png', ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data'], 25000, -73.979167, 40.758611)
-#makeFrequentMap('brooklyn.png', ['Subway Data', 'LIRR Data'], ['Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'SI Ferry Data'], 30000, -73.952222, 40.624722)
-#makeFrequentMap('si.png', ['Subway Data', 'NJT Rail Data'], ['SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data'], 25000, -74.144839, 40.576281)
+makeFrequentMap('brooklyn.png', ['Subway Data', 'LIRR Data'], ['Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'SI Ferry Data'], 30000, -73.952222, 40.624722)
+makeFrequentMap('si.png', ['Subway Data', 'NJT Rail Data'], ['SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data', 'NJT Bus Data'], 25000, -74.144839, 40.576281)

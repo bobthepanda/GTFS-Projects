@@ -1,8 +1,8 @@
 ,route_id,max_route_headway,max_route_weekday_headway
-40,n6,6,5
-26,n4,10,8
-6,n15,12,10
+40,n6,7,5
+26,n4,12,8
 10,n20G,15,7
+6,n15,15,10
 13,n22,15,15
 11,n20H,30,15
 17,n24,30,15
