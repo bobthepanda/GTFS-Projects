@@ -44,7 +44,16 @@ stopData = ['stop_lon', 'stop_lat']
 calendarData = ['service_id'] + daysOfTheWeek
 calendarDateData = ['service_id', 'date']
 
+storedShapes = {}
+storedTrips = {}
+storedStopTimes = {}
+storedCalendar = {}
+storedNumTrips = {}
+
 def getData(folder, shapes, trips, stopTimes, calendar):
+    if folder in storedShapes:
+        print('Retrieving stored data.')
+        return lists(storedShapes[folder], storedTrips[folder], storedStopTimes[folder], storedCalendar[folder])
     print('Adding data from ' + folder + '.')
 
     # Read the files from the data.
@@ -87,9 +96,17 @@ def getData(folder, shapes, trips, stopTimes, calendar):
     else:
         print('No data missing.\n')
 
+    storedShapes[folder] = shapes
+    storedTrips[folder] = trips
+    storedStopTimes[folder] = stopTimes
+    storedCalendar[folder] = calendar
+
     return lists(shapes, trips, stopTimes, calendar)
 
 def getNumTrips(folder, trips, stopTimes, calendar):
+    if folder in storedNumTrips:
+        print('Retrieving stored data.\n')
+        return storedNumTrips[folder]
     validFreq = pd.DataFrame()
 
     # Only grab the first stop for every trip.
@@ -113,9 +130,10 @@ def getNumTrips(folder, trips, stopTimes, calendar):
 
     # Start a DataFrame with all the shape_ids.
     numTrips = validTripTimes.groupby(['shape_id']).first().reset_index()[['route_id', 'shape_id']]
-    numTrips['max_headway'] = 121
-    numTrips['max_route_headway'] = 121
-    numTrips['max_route_weekday_headway'] = 121
+    numTrips['max_headway'] = 121.0
+    numTrips['max_route_headway'] = 121.0
+    numTrips['max_route_weekday_headway'] = 121.0
+    numTrips['headway_tier'] = 121.0
 
     last_route_id = "null"
     max_route_headway = -1.0
@@ -164,7 +182,7 @@ def getNumTrips(folder, trips, stopTimes, calendar):
                     currentRouteTripsHour = currentRouteTripsHour.append(currentRouteTrips[(currentRouteTrips.arrival_time >= beginHourString) & (currentRouteTrips.arrival_time < endHourString)])
 
                 for day in daysOfTheWeek:
-                    currentRouteTripsNum = currentRouteTripsHour[[day, 'arrival_time']].iloc[:,0].sum()
+                    currentRouteTripsNum = currentRouteTripsHour[day].sum()
                     if currentRouteTripsNum != 0:
                         route_headway = (60 * base_directions) / currentRouteTripsNum
                         if route_headway > max_route_headway:
@@ -176,16 +194,31 @@ def getNumTrips(folder, trips, stopTimes, calendar):
                         if day in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']:
                             max_route_weekday_headway = 121
                     else:
-                        max_route_headway = 121
                         if day in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']:
                             max_route_weekday_headway = 121
 
         numTrips.set_value(row.Index, 'max_headway', max_headway)
+        numTrips.set_value(row.Index, 'headway_tier', baseline_headway(max_route_headway))
         numTrips.set_value(row.Index, 'max_route_headway', max_route_headway)
         numTrips.set_value(row.Index, 'max_route_weekday_headway', max_route_weekday_headway)
         last_route_id = row.route_id
 
+    storedNumTrips[folder] = numTrips
+
     return numTrips
+
+def baseline_headway(x):
+    x = round(x)
+    if x < base_maxheadway:
+        return base_maxheadway
+    elif x < second_maxheadway:
+        return second_maxheadway
+    elif x < third_maxheadway:
+        return third_maxheadway
+    elif x != 121:
+        return 60
+    else:
+        return x
 
 def plotData(m, folder, minsize):
     shapes = pd.DataFrame()
@@ -193,16 +226,23 @@ def plotData(m, folder, minsize):
     stopTimes = pd.DataFrame()
     calendar = pd.DataFrame()
 
+    t0 = time()
     shapes, trips, stopTimes, calendar = getData(folder, shapes, trips, stopTimes, calendar)
 
     numTrips = getNumTrips(folder, trips, stopTimes, calendar).sort_values(['max_headway'])
+    print(time() - t0)
 
     numTrips.sort_values(['route_id']).to_json(path_or_buf=(folder.replace(" ", "") + 'TripData.json'), orient='records')
 
-    numTrips_csv = numTrips[['route_id', 'max_route_headway', 'max_route_weekday_headway']]
-    numTrips_csv.groupby('route_id').first().reset_index().sort_values(['max_route_headway','max_route_weekday_headway', 'route_id']).to_csv(path_or_buf=(folder.replace(" ", "") + 'RouteData.csv'))
+    numTrips_csv = numTrips[['route_id', 'headway_tier', 'max_route_headway', 'max_route_weekday_headway']].groupby('route_id').first().reset_index().round(2)
+    numTrips_csv.sort_values(['headway_tier', 'route_id']).to_csv(path_or_buf=(folder.replace(" ", "") + 'RouteData.csv'))
 
+    t0 = time()
     plotDataOnMap(m, shapes, numTrips, minsize)
+    print(time() - t0)
+    print()
+
+    return numTrips_csv
 
 def plotDataOnMap(m, shapes, numTrips, min_draw_size):
     # Map the routes, with transparency dependent on frequency.
@@ -249,17 +289,19 @@ def makeFrequentMap(fileName, railFolderList, busFolderList, width_height, lon, 
     plt.figure(figsize=(36, 36), dpi=72)
     plt.title('1 - New York Transit Frequency')
     map = Basemap(resolution="h", projection="stere", width=width_height, height=width_height, lon_0=lon, lat_0=lat)
+    numTrips = pd.DataFrame()
 
     # Plot trains.
     for folder in railFolderList:
-        plotData(map, folder, min_draw_size * 2)
+        numTrips = numTrips.append(plotData(map, folder, min_draw_size * 2))
         plotStops(map, folder, min_draw_size * 2)
 
     # Plot bus routes.
     for folder in busFolderList:
-        plotData(map, folder, min_draw_size)
+        numTrips = numTrips.append(plotData(map, folder, min_draw_size))
 
     plt.savefig(fileName, facecolor='white',edgecolor='white')
+    numTrips.sort_values(['headway_tier', 'route_id']).to_csv(path_or_buf=('MasterList.csv'))
     #plt.show()
 
 makeFrequentMap('new_york.png', ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'Westchester Data', 'Nassau Data', 'NJT Bus Data', 'SI Ferry Data'], 80000, -73.935242, 40.730610)

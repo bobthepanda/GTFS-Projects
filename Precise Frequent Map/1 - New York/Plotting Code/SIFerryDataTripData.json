@@ -1,1 +1,1 @@
-[{"route_id":"SIF","shape_id":"stgeorge","max_headway":30,"max_route_headway":20,"max_route_weekday_headway":15},{"route_id":"SIF","shape_id":"whitehall","max_headway":60,"max_route_headway":20,"max_route_weekday_headway":15}]
+[{"route_id":"SIF","shape_id":"stgeorge","max_headway":30.0,"max_route_headway":20.0,"max_route_weekday_headway":15.0,"headway_tier":30.0},{"route_id":"SIF","shape_id":"whitehall","max_headway":60.0,"max_route_headway":20.0,"max_route_weekday_headway":15.0,"headway_tier":30.0}]
