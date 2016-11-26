@@ -35,7 +35,7 @@ base_hourspan = base_maxhour - base_minhour - 1
 
 base_trips = len(daysOfTheWeek) * (base_hourspan) * (60 / base_maxheadway)
 
-min_draw_size = 8
+min_draw_size = 2
 
 shapeData = ['shape_id','shape_pt_lon','shape_pt_lat']
 routeData = ['route_id', 'service_id', 'shape_id', 'trip_id']
@@ -52,7 +52,7 @@ storedNumTrips = {}
 
 def getData(folder, shapes, trips, stopTimes, calendar):
     if folder in storedShapes:
-        print('Retrieving stored data.')
+        print('Retrieving stored data for ' + folder + '.\n')
         return lists(storedShapes[folder], storedTrips[folder], storedStopTimes[folder], storedCalendar[folder])
     print('Adding data from ' + folder + '.')
 
@@ -105,7 +105,6 @@ def getData(folder, shapes, trips, stopTimes, calendar):
 
 def getNumTrips(folder, trips, stopTimes, calendar):
     if folder in storedNumTrips:
-        print('Retrieving stored data.\n')
         return storedNumTrips[folder]
     validFreq = pd.DataFrame()
 
@@ -226,21 +225,17 @@ def plotData(m, folder, minsize):
     stopTimes = pd.DataFrame()
     calendar = pd.DataFrame()
 
-    t0 = time()
     shapes, trips, stopTimes, calendar = getData(folder, shapes, trips, stopTimes, calendar)
 
     numTrips = getNumTrips(folder, trips, stopTimes, calendar).sort_values(['max_headway'])
-    print(time() - t0)
 
-    numTrips.sort_values(['route_id']).to_json(path_or_buf=(folder.replace(" ", "") + 'TripData.json'), orient='records')
+    os.makedirs("json",exist_ok=True)
+    numTrips.sort_values(['route_id']).to_json(path_or_buf=("json/" + folder.replace(" ", "") + 'TripData.json'), orient='records')
 
+    os.makedirs("csv",exist_ok=True)
     numTrips_csv = numTrips[['route_id', 'headway_tier', 'max_route_headway', 'max_route_weekday_headway']].groupby('route_id').first().reset_index().round(2)
-    numTrips_csv.sort_values(['headway_tier', 'route_id']).to_csv(path_or_buf=(folder.replace(" ", "") + 'RouteData.csv'))
-
-    t0 = time()
+    numTrips_csv.sort_values(['headway_tier', 'route_id']).to_csv(path_or_buf=("csv/" + folder.replace(" ", "") + 'RouteData.csv'))
     plotDataOnMap(m, shapes, numTrips, minsize)
-    print(time() - t0)
-    print()
 
     return numTrips_csv
 
@@ -252,62 +247,70 @@ def plotDataOnMap(m, shapes, numTrips, min_draw_size):
         route_headway = row.max_route_headway
         currentShape = shapes[shapes['shape_id'] == shape_id]
 
+        base_transp = 1
         transp = base_maxheadway / headway
-        colorNum = base_maxheadway / route_headway
-        color = 'grey'
-        width = 1
+        width = base_maxheadway / route_headway
+        color = 'black'
 
         if (transp >= 1):
             transp = 1
+
+        if width >= 1:
             width = 1
-        elif (transp >= base_maxheadway / second_maxheadway):
+        elif (width >= base_maxheadway / second_maxheadway):
             width = .5
-        elif (transp >= base_maxheadway / third_maxheadway):
+        elif (width >= base_maxheadway / third_maxheadway):
             width = .25
-        else:
+        elif (width >= base_maxheadway / 60):
             width = .125
+        else:
+            width = .01
 
-        if (colorNum >= 1):
-            color = 'red'
-        elif (colorNum >= base_maxheadway / second_maxheadway):
-            color = 'yellow'
-        elif (colorNum >= base_maxheadway / third_maxheadway):
-            color = 'blue'
-
-        m.plot(currentShape['shape_pt_lon'].values, currentShape['shape_pt_lat'].values, color=color, latlon=True, linewidth=min_draw_size * width, alpha=transp)
+        m.plot(currentShape['shape_pt_lon'].values, currentShape['shape_pt_lat'].values, color=color, latlon=True, linewidth=min_draw_size * width, alpha=base_transp * transp)
 
 def plotStops(m, folder, min_draw_size):
-    stops = pd.read_csv('../Subway Data/stops.txt')[stopData]
+    stops = pd.read_csv('../' + folder + '/stops.txt')[stopData]
 
     # Make cute little stop circles for the stops.
     for index, row in stops.iterrows():
-        m.plot(row['stop_lon'], row['stop_lat'], marker='o', markersize=min_draw_size * .5, markeredgecolor='white', markerfacecolor='black', markeredgewidth=min_draw_size * .25, latlon=True)
+        m.plot(row['stop_lon'], row['stop_lat'], marker='o', markersize=min_draw_size * .5, markeredgecolor='white', markerfacecolor='black', markeredgewidth=min_draw_size * .125, alpha=.5,latlon=True)
 
 
-def makeFrequentMap(fileName, railFolderList, busFolderList, width_height, lon, lat):
+def makeFrequentMap(fileName, railFolderList, busFolderList, width_height, lat, lon):
     # Create a map of New York City centered on Manhattan.
     plt.figure(figsize=(36, 36), dpi=72)
     plt.title('1 - New York Transit Frequency')
     map = Basemap(resolution="h", projection="stere", width=width_height, height=width_height, lon_0=lon, lat_0=lat)
     numTrips = pd.DataFrame()
 
+    numProcessed = 0
+
     # Plot trains.
     for folder in railFolderList:
+        if numProcessed > 0:
+            print('-' * 50 + '\n')
         numTrips = numTrips.append(plotData(map, folder, min_draw_size * 2))
-        plotStops(map, folder, min_draw_size * 2)
+        numProcessed += 1
 
     # Plot bus routes.
     for folder in busFolderList:
+        if numProcessed > 0:
+            print('-' * 50 + '\n')
         numTrips = numTrips.append(plotData(map, folder, min_draw_size))
+        numProcessed += 1
 
-    plt.savefig(fileName, facecolor='white',edgecolor='white')
-    numTrips.sort_values(['headway_tier', 'route_id']).to_csv(path_or_buf=('MasterList.csv'))
+    for folder in railFolderList:
+        plotStops(map, folder, min_draw_size * 2)
+
+    os.makedirs("img",exist_ok=True)
+    plt.savefig("img/" + fileName, facecolor='white',edgecolor='white')
+    print('=' * 50 + '\n')
     #plt.show()
 
-makeFrequentMap('new_york.png', ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'Westchester Data', 'Nassau Data', 'NJT Bus Data', 'SI Ferry Data'], 80000, -73.935242, 40.730610)
+makeFrequentMap('new_york.png', ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'Westchester Data', 'Nassau Data', 'NJT Bus Data', 'SI Ferry Data'], 80000, 40.730610, -73.935242)
 
-makeFrequentMap('bronx.png', ['Subway Data', 'Metro North Data'], ['Bronx Data', 'Queens Data', 'Manhattan Data', 'MTA Bus Data', 'Westchester Data', 'NJT Bus Data'], 20000, -73.886111, 40.837222)
-makeFrequentMap('queens.png', ['Subway Data', 'LIRR Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'MTA Bus Data', 'Nassau Data'], 30000, -73.866667, 40.75)
-makeFrequentMap('manhattan.png', ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data'], 25000, -73.979167, 40.758611)
-makeFrequentMap('brooklyn.png', ['Subway Data', 'LIRR Data'], ['Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'SI Ferry Data'], 30000, -73.952222, 40.624722)
-makeFrequentMap('si.png', ['Subway Data', 'NJT Rail Data'], ['SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data', 'NJT Bus Data'], 25000, -74.144839, 40.576281)
+# makeFrequentMap('bronx.png', ['Subway Data', 'Metro North Data'], ['Bronx Data', 'Queens Data', 'Manhattan Data', 'MTA Bus Data', 'Westchester Data', 'NJT Bus Data'], 20000, 40.837222, -73.886111)
+# makeFrequentMap('queens.png', ['Subway Data', 'LIRR Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'MTA Bus Data', 'Nassau Data'], 26000, 40.680459, -73.843703)
+# makeFrequentMap('manhattan.png', ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data'], 25000, 40.758611, -73.979167)
+# makeFrequentMap('brooklyn.png', ['Subway Data', 'LIRR Data'], ['Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'SI Ferry Data'], 15000, 40.631111, -73.9525)
+# makeFrequentMap('si.png', ['Subway Data', 'NJT Rail Data'], ['SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data', 'NJT Bus Data'], 25000, 40.576281, -74.144839)
