@@ -75,31 +75,34 @@ def adjBusTimes(busStops, busStopTimes, busTrips, busCalendar):
     busStopTimesInRange = busStopTimes[onTuesday & notTooEarly].sort_values(['arrival_time'])
 
     busStops['closest_stop_to_subway'] = busStops['stop_id']
-    busStops['last_checked'] = busStops['stop_id']
     busStops['earliest_arrival_time'] = max_time
 
+    stopsProcessed = 0
+    time_begin = time()
+
     for stop in busStops.itertuples():
-        if busStops.get_value(stop.Index, 'closest_stop_to_subway') == stop.stop_id:
-            tripsStoppingHere = busStopTimesInRange[busStopTimesInRange['stop_id'] == stop.stop_id]
-            for trip in tripsStoppingHere.itertuples():
-                onThisTrip = busStopTimesInRange['trip_id'] == trip.trip_id
-                afterThisStop = busStopTimesInRange['stop_sequence'] > trip.stop_sequence
-                nextStops = busStops[busStops['stop_id'].isin(busStopTimesInRange[onThisTrip & afterThisStop]['stop_id'])]
+        if time() - time_begin > 180:
+            break
+        tripsStoppingHere = busStopTimesInRange[busStopTimesInRange['stop_id'] == stop.stop_id]
+        for trip in tripsStoppingHere.itertuples():
+            if time() - time_begin > 180:
+                break
+            onThisTrip = busStopTimesInRange['trip_id'] == trip.trip_id
+            afterThisStop = busStopTimesInRange['stop_sequence'] > trip.stop_sequence
+            nextStops = busStops[busStops['stop_id'].isin(busStopTimesInRange[onThisTrip & afterThisStop]['stop_id'])]
 
-                if stop.distance_from_subway <= nextStops['distance_from_subway'].max():
-                    for n in nextStops.itertuples():
-                        if n.last_checked != stop.stop_id:
-                            busStops.set_value(n.Index, 'last_checked', stop.stop_id)
+            for n in nextStops.itertuples():
+                if time() - time_begin > 180:
+                    break
+                stopToCheck = busStopTimesInRange[onThisTrip & afterThisStop & (busStopTimesInRange['stop_id'] == n.stop_id)].reset_index()
+                timeValue = stopToCheck.get_value(0, 'arrival_time')
+                if n.earliest_arrival_time > timeValue:
+                    busStops.set_value(n.Index, 'earliest_arrival_time', timeValue)
+                    busStops.set_value(n.Index, 'closest_stop_to_subway', stop.stop_id)
+                    busStops.set_value(n.Index, 'distance_from_subway', stop.distance_from_subway)
+        stopsProcessed +=1
 
-                            stopToCheck = busStopTimesInRange[onThisTrip & afterThisStop & (busStopTimesInRange['stop_id'] == n.stop_id)].reset_index()
-                            timeValue = stopToCheck.get_value(0, 'arrival_time')
-
-                            if n.earliest_arrival_time > timeValue:
-                                busStops.set_value(n.Index, 'earliest_arrival_time', timeValue)
-                                busStops.set_value(n.Index, 'closest_stop_to_subway', stop.stop_id)
-                                busStops.set_value(n.Index, 'distance_from_subway', stop.distance_from_subway)
-                            else:
-                                break
+    print("Stops processed: " + str(stopsProcessed))
     return busStops
 
 def makeIsochromeMap(fileName, busFolderList, lat, lon):
@@ -127,7 +130,12 @@ def makeIsochromeMap(fileName, busFolderList, lat, lon):
 
     #print(busStops.sort_values(['distance_from_subway']))
 
-    print(busStops)
+    t0 = time()
+    busStops = adjBusTimes(busStops.sort_values(['distance_from_subway']), busStopTimes, busTrips, busCalendar)
+    return
+    print(time()-t0)
+
+    busStops.sort_values(['earliest_arrival_time'], inplace=True)
 
     #plotSubwayStops(m, subwayStops, 10, 'red')
     plotBusStops(m, busStops, 10, 'red')
