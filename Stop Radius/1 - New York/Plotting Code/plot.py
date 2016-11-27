@@ -100,6 +100,8 @@ def adjBusTimes(busStops, busStopTimes, busTrips, busCalendar):
                     busStops.set_value(n.Index, 'earliest_arrival_time', timeValue)
                     busStops.set_value(n.Index, 'closest_stop_to_subway', stop.stop_id)
                     busStops.set_value(n.Index, 'distance_from_subway', stop.distance_from_subway)
+                else:
+                    break
         stopsProcessed +=1
 
     print("Stops processed: " + str(stopsProcessed))
