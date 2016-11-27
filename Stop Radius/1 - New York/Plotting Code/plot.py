@@ -1,30 +1,28 @@
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
-from time import time, sleep
+from time import time, sleep, strptime
 import numpy as np
 import pandas as pd
 import os.path
 import datetime
 import collections
 from math import radians, cos, sin, asin, sqrt
+from datetime import timedelta, datetime
 
 stopData = ['stop_id', 'stop_lon', 'stop_lat']
 stopTimeData = ['stop_id', 'arrival_time', 'trip_id', 'stop_sequence']
-tripData = ['service_id', 'trip_id']
+tripData = ['route_id', 'service_id', 'trip_id']
 calendarData = ['service_id', 'tuesday']
 
-width_height = 80000
-img_wh = 35
-dpi = 72
-
 walk_kph = 5.7
-adj_amount = img_wh * dpi / width_height
+adj_amount = 36 * 72 / 80000
 
 walk_meters_per_min = walk_kph * 1000 / 60
 
 min_time = "17:00:00"
 max_time = "18:00:00"
-
+time_format = "%H:%M:%S"
+min_time_dt = datetime.strptime(min_time, time_format)
 
 
 def haversine_meters(lon1, lat1, lon2, lat2):
@@ -46,70 +44,68 @@ def haversine_meters(lon1, lat1, lon2, lat2):
 def readStops(folder):
     return pd.read_csv('../' + folder + '/stops.txt')[stopData]
 
-def readBusStops(folder):
-    busStops = pd.read_csv('../' + folder + '/stops.txt')[stopData]
-    busStopTimes = pd.read_csv('../' + folder + '/stop_times.txt')[stopTimeData]
-    busTrips = pd.read_csv('../' + folder + '/trips.txt')[tripData]
-    busCalendar = pd.read_csv('../' + folder + '/calendar.txt')[calendarData]
-    return busStops, busStopTimes, busTrips, busCalendar
+def readBusStops(folderList):
+    busStops = pd.DataFrame()
+    busStopTimes = pd.DataFrame()
+    busTrips = pd.DataFrame()
+    busCalendar = pd.DataFrame()
 
-def plotSubwayStops(m, stops, time, color):
+    for folder in folderList:
+        busStops = busStops.append(pd.read_csv('../' + folder + '/stops.txt')[stopData])
+        busStopTimes = busStopTimes.append(pd.read_csv('../' + folder + '/stop_times.txt')[stopTimeData])
+        busTrips = busTrips.append(pd.read_csv('../' + folder + '/trips.txt')[tripData])
+        busCalendar = busCalendar.append(pd.read_csv('../' + folder + '/calendar.txt')[calendarData])
+
+    busTrips['express'] = busTrips['route_id'].apply(lambda x: True in [prefix in x[:len(prefix)] for prefix in ['QM', 'BM', 'BxM', 'SM', 'X']])
+    busTrips = busTrips[~busTrips['express']]
+    return busStops.drop_duplicates().reset_index(), busStopTimes.drop_duplicates().reset_index(), busTrips.drop_duplicates().reset_index(), busCalendar.drop_duplicates().reset_index()
+
+def plotSubwayStops(m, stops, time, color, alpha):
     # Make cute little stop circles for the stops.
     size = walk_meters_per_min * time * adj_amount
     for row in stops.itertuples():
-        m.plot(row.stop_lon, row.stop_lat, marker='o', markersize=size, markeredgecolor=color, markerfacecolor=color,latlon=True)
+        m.plot(row.stop_lon, row.stop_lat, marker='o', markersize=size, markeredgecolor='none', markerfacecolor=color, alpha=alpha, latlon=True)
 
-def plotBusStops(m, stops, time, color):
+def plotBusStops(m, stops, time, color, alpha):
     # Make cute little stop circles for the stops.
     adj_size = walk_meters_per_min * adj_amount
     for row in stops.itertuples():
-        if row.time_from_subway < time:
-            m.plot(row.stop_lon, row.stop_lat, marker='o', markersize=(time - row.time_from_subway) * adj_size, markeredgecolor=color, markerfacecolor=color,latlon=True)
+        traveled_time = row.total_travel_time
+        if traveled_time <= time:
+            m.plot(row.stop_lon, row.stop_lat, marker='o', markersize=(time - traveled_time) * adj_size, markeredgecolor='none', markerfacecolor=color, alpha=alpha, latlon=True)
 
 def adjBusTimes(busStops, busStopTimes, busTrips, busCalendar):
     busTripsOnTuesday = pd.merge(busTrips, busCalendar, on='service_id', how='inner')
     busTripsOnTuesday = busTripsOnTuesday[busTripsOnTuesday['tuesday'] == 1]
 
-    onTuesday = busStopTimes['trip_id'].isin(busTripsOnTuesday['trip_id'])
     notTooEarly = busStopTimes['arrival_time'] >= min_time
-    busStopTimesInRange = busStopTimes[onTuesday & notTooEarly].sort_values(['arrival_time'])
+    notTooLate = busStopTimes['arrival_time'] <= max_time
+    busStopTimesInRange = busStopTimes[notTooEarly & notTooLate].sort_values(['arrival_time'])
 
-    busStops['closest_stop_to_subway'] = busStops['stop_id']
-    busStops['earliest_arrival_time'] = max_time
+    # Keep a record of all arrivals at bus stops on Tuesdays within the given time range.
+    busStopTimesOnTuesday = pd.merge(busStopTimesInRange, busTripsOnTuesday, on='trip_id', how='inner').drop(['index_x', 'index_y', 'route_id', 'service_id', 'express', 'tuesday'], 1)
+    validBusStops = pd.merge(busStopTimesOnTuesday, busStops, on='stop_id', how='inner').drop(['index_x', 'index_y'], axis=1)
 
-    stopsProcessed = 0
-    time_begin = time()
+    # Grab the closest stop to the subway for each trip.
+    closestBusStops = validBusStops.sort_values('distance_from_subway').groupby('trip_id', as_index=False).first()
+    closestBusStops = closestBusStops.drop(['stop_lon', 'stop_lat', 'arrival_time', 'distance_from_subway'], axis=1)
+    closestBusStops.columns = ['trip_id', 'closest_stop_id', 'closest_stop_sequence', 'time_to_closest']
+    validBusStops = pd.merge(validBusStops, closestBusStops, on='trip_id', how='inner')
 
-    for stop in busStops.itertuples():
-        if time() - time_begin > 180:
-            break
-        tripsStoppingHere = busStopTimesInRange[busStopTimesInRange['stop_id'] == stop.stop_id]
-        for trip in tripsStoppingHere.itertuples():
-            if time() - time_begin > 180:
-                break
-            onThisTrip = busStopTimesInRange['trip_id'] == trip.trip_id
-            afterThisStop = busStopTimesInRange['stop_sequence'] > trip.stop_sequence
-            nextStops = busStops[busStops['stop_id'].isin(busStopTimesInRange[onThisTrip & afterThisStop]['stop_id'])]
+    # Omit stops that precede a bus arriving at the closest stop to the subway on the trip.
+    validBusStops = validBusStops[validBusStops['closest_stop_sequence'] <= validBusStops['stop_sequence']]
+    
+    # Calculate the total travel time once you account for the bus, and grab the fastest travel time.
+    validBusStops['bus_travel_time'] = validBusStops['arrival_time'].apply(lambda x: (datetime.strptime(x, time_format) - min_time_dt).total_seconds() / 60)
+    validBusStops['total_travel_time'] = validBusStops['time_to_closest'] + validBusStops['bus_travel_time']
+    validBusStops = validBusStops.sort_values(['total_travel_time']).groupby('stop_id', as_index=False).first()
+    validBusStops.sort_values(['total_travel_time'])
 
-            for n in nextStops.itertuples():
-                if time() - time_begin > 180:
-                    break
-                stopToCheck = busStopTimesInRange[onThisTrip & afterThisStop & (busStopTimesInRange['stop_id'] == n.stop_id)].reset_index()
-                timeValue = stopToCheck.get_value(0, 'arrival_time')
-                if n.earliest_arrival_time > timeValue:
-                    busStops.set_value(n.Index, 'earliest_arrival_time', timeValue)
-                    busStops.set_value(n.Index, 'closest_stop_to_subway', stop.stop_id)
-                    busStops.set_value(n.Index, 'distance_from_subway', stop.distance_from_subway)
-                else:
-                    break
-        stopsProcessed +=1
+    return validBusStops
 
-    print("Stops processed: " + str(stopsProcessed))
-    return busStops
-
-def makeIsochromeMap(fileName, busFolderList, lat, lon):
+def makeIsochromeMap(fileName, busFolderList, width_height, lat, lon):
     # Create a map of New York City centered on Manhattan.
-    plt.figure(figsize=(img_wh, img_wh), dpi=dpi)
+    plt.figure(figsize=(36, 36), dpi=72)
     plt.title('1 - New York Transit Frequency')
     m = Basemap(resolution="h", projection="stere", width=width_height, height=width_height, lon_0=lon, lat_0=lat)
     numTrips = pd.DataFrame()
@@ -117,31 +113,41 @@ def makeIsochromeMap(fileName, busFolderList, lat, lon):
     numProcessed = 0
 
     subwayStops = readStops('Subway Data')
-    busStops, busStopTimes, busTrips, busCalendar = readBusStops('Bronx Data')
 
-    busStops['distance_from_subway'] = 80000
+    adjustedBusStops = []
 
-    # Do all pairs algorithm for bus stops to see which subway stop it is closest to.
-    for s in subwayStops.itertuples():
-        for b in busStops.itertuples():
-            distance_haversine = haversine_meters(s.stop_lon, s.stop_lat, b.stop_lon, b.stop_lat)
-            if distance_haversine < b.distance_from_subway:
-                busStops.set_value(b.Index, 'distance_from_subway', distance_haversine)
+    for borough in ['Queens Data', 'Bronx Data', 'Brooklyn Data', 'SI Data', 'Manhattan Data', 'MTA Bus Data']:
+        busStops, busStopTimes, busTrips, busCalendar = readBusStops([borough])
 
-    busStops['time_from_subway'] = busStops['distance_from_subway'] / walk_meters_per_min
+        busStops['distance_from_subway'] = 80000
 
-    #print(busStops.sort_values(['distance_from_subway']))
+        for s in subwayStops.itertuples():
+            for b in busStops.itertuples():
+                distance_haversine = haversine_meters(s.stop_lon, s.stop_lat, b.stop_lon, b.stop_lat)
+                if distance_haversine < b.distance_from_subway:
+                    busStops.set_value(b.Index, 'distance_from_subway', distance_haversine)
 
-    t0 = time()
-    busStops = adjBusTimes(busStops.sort_values(['distance_from_subway']), busStopTimes, busTrips, busCalendar)
-    return
-    print(time()-t0)
+        busStops['time_from_subway'] = busStops['distance_from_subway'] / walk_meters_per_min
 
-    busStops.sort_values(['earliest_arrival_time'], inplace=True)
+        t0 = time()
+        adjustedBusStops.append(adjBusTimes(busStops.sort_values(['distance_from_subway']), busStopTimes, busTrips, busCalendar).copy())
+        print(time()-t0)
 
-    #plotSubwayStops(m, subwayStops, 10, 'red')
-    plotBusStops(m, busStops, 10, 'red')
+    aggregateBusStops = pd.DataFrame()
+
+    for boroughBusStops in adjustedBusStops:
+        aggregateBusStops = aggregateBusStops.append(boroughBusStops)
+
+    aggregateBusStops = aggregateBusStops.sort_values(['total_travel_time']).groupby('stop_id').first()
+
+    dist = [15, 10, 5]
+    color = ['#b3cde3', '#8c96c6', '#88419d']
+
+    for i in range(3):
+        colorNum = (0, 0, ((1 / (3 ** 3)) * ((3 ** 3)-(i**3))))
+        plotSubwayStops(m, subwayStops, dist[i], color[i], 1)
+        plotBusStops(m, aggregateBusStops, dist[i], color[i], 1)
     plt.savefig("img/" + fileName, facecolor='white',edgecolor='white')
     #plt.show()
 
-makeIsochromeMap('new_york.png', [], 40.730610, -73.935242)
+makeIsochromeMap('new_york.png', [], 80000, 40.730610, -73.935242)
