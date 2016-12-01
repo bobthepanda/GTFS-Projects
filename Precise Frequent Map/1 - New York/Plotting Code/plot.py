@@ -63,6 +63,16 @@ def getData(folder, shapes, trips, stopTimes, calendar):
     readCalendar = pd.DataFrame()
     if os.path.isfile('../' + folder + '/calendar.txt'):
         readCalendar = pd.read_csv('../' + folder + '/calendar.txt')[calendarData]
+        if os.path.isfile('../' + folder + '/calendar_dates.txt'):
+            readCalendarDates = pd.read_csv('../' + folder + '/calendar_dates.txt')[calendarDateData]
+            calendarDates = readCalendarDates[(readCalendarDates.date >= start_date) & (readCalendarDates.date <= (start_date + 6))]
+            dayNum = 0
+            while dayNum < len(daysOfTheWeek):
+                currentDay = calendarDates[(calendarDates.date == (start_date + dayNum))]
+                for row in readCalendar.itertuples():
+                    if len(currentDay[(currentDay.service_id == row.service_id)]):
+                        readCalendar.set_value(row.Index, daysOfTheWeek[dayNum], 0)
+                dayNum +=1
     else:
         readCalendarDates = pd.read_csv('../' + folder + '/calendar_dates.txt')[calendarDateData]
         calendarDates = readCalendarDates[(readCalendarDates.date >= start_date) & (readCalendarDates.date <= (start_date + 6))]
@@ -104,6 +114,11 @@ def getData(folder, shapes, trips, stopTimes, calendar):
     return lists(shapes, trips, stopTimes, calendar)
 
 def getNumTrips(folder, trips, stopTimes, calendar):
+    shape_ids = pd.Series(trips['shape_id'].unique())
+    route_ids = pd.Series(trips['route_id'].unique())
+
+    shape_w_route_ids = trips.groupby(['route_id', 'shape_id'], as_index = False).first()[['route_id', 'shape_id']]
+
     if folder in storedNumTrips:
         return storedNumTrips[folder]
     validFreq = pd.DataFrame()
@@ -128,91 +143,98 @@ def getNumTrips(folder, trips, stopTimes, calendar):
     validTripTimes = pd.merge(pd.merge(validTrips, calendar, on='service_id', how='inner'), smallStopTimes, on='trip_id', how='inner')
 
     # Start a DataFrame with all the shape_ids.
-    numTrips = validTripTimes.groupby(['shape_id']).first().reset_index()[['route_id', 'shape_id']]
-    numTrips['max_headway'] = 121.0
-    numTrips['max_route_headway'] = 121.0
-    numTrips['max_route_weekday_headway'] = 121.0
-    numTrips['headway_tier'] = 121.0
+    numTripsShape = pd.DataFrame()
+    numTripsRoute = pd.DataFrame()
 
-    last_route_id = "null"
-    max_route_headway = -1.0
-    max_route_weekday_headway = -1.0
-    for row in numTrips.itertuples():
-        currentTrips = validTripTimes[(validTripTimes.shape_id == row.shape_id)]
-        currentRouteTrips = validTripTimes[(validTripTimes.route_id == row.route_id)]
-        # print('Row data for ' + row.shape_id + ', ' + row.route_id)
-        # print(currentRouteTrips.sort_values(['sunday', 'arrival_time']))
-        max_headway = -1
+    # Grab the selection of trips during every hour timeframe during the days.
+    for currentHour in range(base_minhour, base_maxhour - 1):
+        beginHourString = '{0:0>2}:00:00'.format(currentHour % 24)
+        endHourString = '{0:0>2}:00:00'.format((currentHour % 24) +1)
 
-        for currentHour in range(base_minhour, base_maxhour):
-            beginHourString = '{0:0>2}:00:00'.format(currentHour % 24)
-            endHourString = '{0:0>2}:00:00'.format((currentHour % 24) +1)
+        currentTripsHour = validTripTimes[(validTripTimes.arrival_time >= beginHourString) & (validTripTimes.arrival_time < endHourString)]
 
-            currentTripsHour = currentTrips[(currentTrips.arrival_time >= beginHourString) & (currentTrips.arrival_time < endHourString)]
+        if currentHour > 23:
+            beginHourStringExt = '{0:0>2}:00:00'.format(currentHour)
+            endHourStringExt = '{0:0>2}:00:00'.format((currentHour) +1)
 
-            if currentHour > 23:
-                beginHourString = '{0:0>2}:00:00'.format(currentHour)
-                endHourString = '{0:0>2}:00:00'.format((currentHour) +1)
+            currentTripsHour = currentTripsHour.append(validTripTimes[(validTripTimes.arrival_time >= beginHourStringExt) & (validTripTimes.arrival_time < endHourStringExt)])
 
-                currentTripsHour = currentTripsHour.append(currentTrips[(currentTrips.arrival_time >= beginHourString) & (currentTrips.arrival_time < endHourString)])
+        for day in daysOfTheWeek:
+            currentTripsToday = currentTripsHour[currentTripsHour[day] == 1]
 
-            for day in daysOfTheWeek:
-                currentTripsNum = currentTripsHour[[day, 'arrival_time']].iloc[:,0].sum()
-                if currentTripsNum != 0:
-                    headway = (60 * base_directions) / currentTripsNum
-                    if headway > max_headway:
-                        max_headway = headway
-                else:
-                    max_headway = 121
+            # Count how many trips are within the current timeframe.
+            currentTripsTodayShape = currentTripsToday.groupby('shape_id').size().to_frame('size').reset_index()
+            currentTripsTodayRoute = currentTripsToday.groupby('route_id').size().to_frame('route_size').reset_index()
 
-        if row.route_id != last_route_id:
-            max_route_headway = -1.0
-            max_route_weekday_headway = -1.0
-            for currentHour in range(base_minhour, base_maxhour):
-                beginHourString = '{0:0>2}:00:00'.format(currentHour % 24)
-                endHourString = '{0:0>2}:00:00'.format((currentHour % 24) +1)
+            currentTripsTodayShape['day'] = day
+            currentTripsTodayShape['start_time'] = beginHourString
 
-                currentRouteTripsHour = currentRouteTrips[(currentRouteTrips.arrival_time >= beginHourString) & (currentRouteTrips.arrival_time < endHourString)]
+            currentTripsTodayRoute['route_day'] = day
+            currentTripsTodayRoute['route_start_time'] = beginHourString
 
-                if currentHour > 23:
-                    beginHourString = '{0:0>2}:00:00'.format(currentHour)
-                    endHourString = '{0:0>2}:00:00'.format((currentHour) +1)
+            # Add it to the list of known trip numbers.
+            numTripsShape = numTripsShape.append(currentTripsTodayShape.copy())
+            numTripsRoute = numTripsRoute.append(currentTripsTodayRoute.copy())
 
-                    currentRouteTripsHour = currentRouteTripsHour.append(currentRouteTrips[(currentRouteTrips.arrival_time >= beginHourString) & (currentRouteTrips.arrival_time < endHourString)])
+    # Grab only the route trip numbers for weekdays.
+    numTripsRouteWeekday = numTripsRoute[numTripsRoute['route_day'].apply(lambda x: x in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'])]
 
-                for day in daysOfTheWeek:
-                    currentRouteTripsNum = currentRouteTripsHour[day].sum()
-                    if currentRouteTripsNum != 0:
-                        route_headway = (60 * base_directions) / currentRouteTripsNum
-                        if route_headway > max_route_headway:
-                            max_route_headway = route_headway
-                        if day in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'] and route_headway > max_route_weekday_headway:
-                            max_route_weekday_headway = route_headway
-                    elif max_route_headway != 121:
-                        max_route_headway = 121
-                        if day in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']:
-                            max_route_weekday_headway = 121
-                    else:
-                        if day in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']:
-                            max_route_weekday_headway = 121
+    # Check for shapes and routes that are not served all the time.
+    shape_tf_count = numTripsShape.groupby('shape_id')['shape_id'].count()
+    full_shapes = shape_tf_count[shape_tf_count == base_hourspan * len(daysOfTheWeek)].sort_values()
+    partial_shapes = shape_ids[~shape_ids.isin(full_shapes.index)]
 
-        numTrips.set_value(row.Index, 'max_headway', max_headway)
-        numTrips.set_value(row.Index, 'headway_tier', baseline_headway(max_route_headway))
-        numTrips.set_value(row.Index, 'max_route_headway', max_route_headway)
-        numTrips.set_value(row.Index, 'max_route_weekday_headway', max_route_weekday_headway)
-        last_route_id = row.route_id
+    partial_shapes_df = pd.DataFrame(partial_shapes, columns=['shape_id'])
+    partial_shapes_df['size'] = 0
+    partial_shapes_df['day'] = 'null'
+    partial_shapes_df['start_time'] = 'null'
+    numTripsShape = numTripsShape.append(partial_shapes_df)
 
-    storedNumTrips[folder] = numTrips
+    route_tf_count = numTripsRoute.groupby('route_id')['route_id'].count()
+    full_routes = route_tf_count[route_tf_count == base_hourspan * len(daysOfTheWeek)].sort_values()
+    partial_routes = route_ids[~route_ids.isin(full_routes.index)]
+
+    partial_routes_df = pd.DataFrame(partial_routes, columns=['route_id'])
+    partial_routes_df['route_size'] = 0
+    partial_routes_df['route_day'] = 'null'
+    partial_routes_df['route_start_time'] = 'null'
+    numTripsRoute = numTripsRoute.append(partial_routes_df)
+
+    route_tf_count = numTripsRoute.groupby('route_id')['route_id'].count()
+    full_routes_weekday = route_tf_count[route_tf_count == base_hourspan * len(daysOfTheWeek)].sort_values()
+    partial_routes_weekday = route_ids[~route_ids.isin(full_routes_weekday.index)]
+
+    partial_routes_weekday_df = pd.DataFrame(partial_routes_weekday, columns=['route_id'])
+    partial_routes_weekday_df['route_size'] = 0
+    partial_routes_weekday_df['route_day'] = 'null'
+    partial_routes_weekday_df['route_start_time'] = 'null'
+    numTripsRouteWeekday = numTripsRouteWeekday.append(partial_routes_weekday_df)
+
+    # Find the lowest number of trips run on a given shape or route during the given time frame.
+    numTripsShape = pd.merge(numTripsShape.sort_values('size').groupby('shape_id').first().reset_index(), shape_w_route_ids, on='shape_id', how='inner')
+    numTripsRoute = numTripsRoute.sort_values('route_size').groupby('route_id').first().reset_index()
+    numTripsRouteWeekday = numTripsRouteWeekday.sort_values('route_size').groupby('route_id').first().reset_index()
+
+    numTripsRouteWeekday.rename(columns={'route_size':'route_weekday_size'}, inplace=True)
+
+    # Consolidate all information about shapes, routes, and routes on weekdays.
+    numTrips = pd.merge(pd.merge(numTripsShape, numTripsRoute, on='route_id', how='inner'), numTripsRouteWeekday, on='route_id', how='inner')
+
+    # Calculate headways.
+    numTrips['max_headway'] = numTrips['size'].apply(lambda x: (60 * base_directions) / x if x != 0 else 121)
+    numTrips['max_route_headway'] = numTrips['route_size'].apply(lambda x: (60 * base_directions) / x if x != 0 else 121)
+    numTrips['max_route_weekday_headway'] = numTrips['route_weekday_size'].apply(lambda x: (60 * base_directions) / x if x != 0 else 121)
+    numTrips['headway_tier'] = numTrips['max_route_headway'].apply(lambda x: baseline_headway(x))
 
     return numTrips
 
 def baseline_headway(x):
     x = round(x)
-    if x < base_maxheadway:
+    if x <= base_maxheadway:
         return base_maxheadway
-    elif x < second_maxheadway:
+    elif x <= second_maxheadway:
         return second_maxheadway
-    elif x < third_maxheadway:
+    elif x <= third_maxheadway:
         return third_maxheadway
     elif x != 121:
         return 60
@@ -227,7 +249,7 @@ def plotData(m, folder, minsize):
 
     shapes, trips, stopTimes, calendar = getData(folder, shapes, trips, stopTimes, calendar)
 
-    numTrips = getNumTrips(folder, trips, stopTimes, calendar).sort_values(['max_headway'])
+    numTrips = getNumTrips(folder, trips, stopTimes, calendar)
 
     os.makedirs("json",exist_ok=True)
     numTrips.sort_values(['route_id']).to_json(path_or_buf=("json/" + folder.replace(" ", "") + 'TripData.json'), orient='records')
@@ -243,7 +265,7 @@ def plotDataOnMap(m, shapes, numTrips, min_draw_size):
     # Map the routes, with transparency dependent on frequency.
     for row in numTrips.itertuples():
         shape_id = row.shape_id
-        headway = row.max_route_headway
+        headway = row.max_headway
         route_headway = row.max_route_headway
         currentShape = shapes[shapes['shape_id'] == shape_id]
 
@@ -307,6 +329,7 @@ def makeFrequentMap(fileName, railFolderList, busFolderList, width_height, lat, 
     print('=' * 50 + '\n')
     #plt.show()
 
+# makeFrequentMap('test.png', [], ['Queens Data'], 80000, 40.730610, -73.935242)
 makeFrequentMap('new_york.png', ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'Westchester Data', 'Nassau Data', 'NJT Bus Data', 'SI Ferry Data'], 80000, 40.730610, -73.935242)
 
 # makeFrequentMap('bronx.png', ['Subway Data', 'Metro North Data'], ['Bronx Data', 'Queens Data', 'Manhattan Data', 'MTA Bus Data', 'Westchester Data', 'NJT Bus Data'], 20000, 40.837222, -73.886111)

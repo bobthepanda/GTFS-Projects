@@ -20,7 +20,7 @@ adj_amount = 36 * 72 / 80000
 walk_meters_per_min = walk_kph * 1000 / 60
 
 min_time = "17:00:00"
-max_time = "18:00:00"
+max_time = "23:59:59"
 time_format = "%H:%M:%S"
 min_time_dt = datetime.strptime(min_time, time_format)
 
@@ -88,15 +88,15 @@ def adjBusTimes(busStops, busStopTimes, busTrips, busCalendar):
 
     # Grab the closest stop to the subway for each trip.
     closestBusStops = validBusStops.sort_values('distance_from_subway').groupby('trip_id', as_index=False).first()
-    closestBusStops = closestBusStops.drop(['stop_lon', 'stop_lat', 'arrival_time', 'distance_from_subway'], axis=1)
-    closestBusStops.columns = ['trip_id', 'closest_stop_id', 'closest_stop_sequence', 'time_to_closest']
+    closestBusStops = closestBusStops.drop(['stop_lon', 'stop_lat', 'distance_from_subway'], axis=1)
+    closestBusStops.columns = ['trip_id', 'closest_stop_id', 'closest_arrival_time', 'closest_stop_sequence', 'time_to_closest']
     validBusStops = pd.merge(validBusStops, closestBusStops, on='trip_id', how='inner')
 
     # Omit stops that precede a bus arriving at the closest stop to the subway on the trip.
     validBusStops = validBusStops[validBusStops['closest_stop_sequence'] <= validBusStops['stop_sequence']]
     
     # Calculate the total travel time once you account for the bus, and grab the fastest travel time.
-    validBusStops['bus_travel_time'] = validBusStops['arrival_time'].apply(lambda x: (datetime.strptime(x, time_format) - min_time_dt).total_seconds() / 60)
+    validBusStops['bus_travel_time'] = validBusStops.apply(lambda x: (datetime.strptime(x['arrival_time'], time_format) - datetime.strptime(x['closest_arrival_time'], time_format)).total_seconds() / 60, axis=1)
     validBusStops['total_travel_time'] = validBusStops['time_to_closest'] + validBusStops['bus_travel_time']
     validBusStops = validBusStops.sort_values(['total_travel_time']).groupby('stop_id', as_index=False).first()
     validBusStops.sort_values(['total_travel_time'])
