@@ -35,11 +35,9 @@ base_hourspan = base_maxhour - base_minhour - 1
 
 base_trips = len(daysOfTheWeek) * (base_hourspan) * (60 / base_maxheadway)
 
-min_draw_size = 2
-
 shapeData = ['shape_id','shape_pt_lon','shape_pt_lat']
 routeData = ['route_id', 'service_id', 'shape_id', 'trip_id']
-timeData = ['arrival_time', 'departure_time', 'trip_id']
+timeData = ['arrival_time', 'departure_time', 'trip_id', 'stop_sequence']
 stopData = ['stop_lon', 'stop_lat']
 calendarData = ['service_id'] + daysOfTheWeek
 calendarDateData = ['service_id', 'date']
@@ -59,12 +57,15 @@ def getData(folder, shapes, trips, stopTimes, calendar):
     # Read the files from the data.
     readShapes = pd.read_csv('../' + folder + '/shapes.txt')[shapeData]
     readTrips = pd.read_csv('../' + folder + '/trips.txt')[routeData]
-    readStopTimes = pd.read_csv('../' + folder + '/stop_times.txt')[timeData]
+    readStopTimes = pd.read_csv('../' + folder + '/stop_times.txt')
+    if 'pickup_type' in readStopTimes.columns.values.tolist():
+        readStopTimes = readStopTimes[readStopTimes['pickup_type'] == 0]
+    readStopTimes = readStopTimes[timeData]
     readCalendar = pd.DataFrame()
     if os.path.isfile('../' + folder + '/calendar.txt'):
         readCalendar = pd.read_csv('../' + folder + '/calendar.txt')[calendarData]
         if os.path.isfile('../' + folder + '/calendar_dates.txt'):
-            readCalendarDates = pd.read_csv('../' + folder + '/calendar_dates.txt')[calendarDateData]
+            readCalendarDates = pd.read_csv('../' + folder + '/calendar_dates.txt')
             calendarDates = readCalendarDates[(readCalendarDates.date >= start_date) & (readCalendarDates.date <= (start_date + 6))]
             dayNum = 0
             while dayNum < len(daysOfTheWeek):
@@ -95,14 +96,10 @@ def getData(folder, shapes, trips, stopTimes, calendar):
 
      # Calculate the number of missing shapes.
     num_shapes = trips.groupby('route_id').size()
-    num_validshapes = trips[trips.shape_id.isin(shapes.shape_id)].groupby('route_id').size()
-    num_missingshapes = num_shapes - num_validshapes
-    percent_missingshapes = num_missingshapes / num_shapes * 100
-    print('Missing data from ' + folder + ':')
-    num_missingshapesList = num_missingshapes[num_missingshapes != 0]
-    if num_missingshapes.empty:
-        print(num_missingshapes[num_missingshapes != 0])
-        print(percent_missingshapes[percent_missingshapes != 0])
+    num_validshapes = trips[~trips.shape_id.isin(shapes.shape_id)].groupby('route_id').size()
+    if not num_validshapes.empty:
+        print(num_validshapes)
+        print()
     else:
         print('No data missing.\n')
 
@@ -112,6 +109,13 @@ def getData(folder, shapes, trips, stopTimes, calendar):
     storedCalendar[folder] = calendar
 
     return lists(shapes, trips, stopTimes, calendar)
+
+def getNumWeekdays():
+    days = 0
+    for day in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']:
+        if day in daysOfTheWeek:
+            days += 1
+    return days
 
 def getNumTrips(folder, trips, stopTimes, calendar):
     shape_ids = pd.Series(trips['shape_id'].unique())
@@ -124,23 +128,23 @@ def getNumTrips(folder, trips, stopTimes, calendar):
     validFreq = pd.DataFrame()
 
     # Only grab the first stop for every trip.
-    smallStopTimes = stopTimes.sort_values(['arrival_time']).groupby(['trip_id']).first().reset_index()[['trip_id', 'arrival_time']]
+    first_stop_times = stopTimes.sort_values(['stop_sequence']).groupby(['trip_id']).first().reset_index()[['trip_id', 'arrival_time']]
     invalidTrips = pd.DataFrame()
 
     # Grab the trips that are made outside the min and max times.
-    tooEarly = smallStopTimes['arrival_time'] < '{0:0>2}:00:00'.format(base_minhour)
-    tooLate = smallStopTimes['arrival_time'] > '{0:0>2}:00:00'.format(base_maxhour)
+    tooEarly = first_stop_times['arrival_time'] < '{0:0>2}:00:00'.format(base_minhour)
+    tooLate = first_stop_times['arrival_time'] > '{0:0>2}:00:00'.format(base_maxhour)
     if base_minhour < base_maxhour:
-        invalidTrips = smallStopTimes[(tooEarly | tooLate)]
+        invalidTrips = first_stop_times[(tooEarly | tooLate)]
     else:
-        invalidTrips = smallStopTimes[(tooEarly & tooLate)]
+        invalidTrips = first_stop_times[(tooEarly & tooLate)]
 
     # Filter out the invalid trips.
     in_validTrips = trips['trip_id'].isin(invalidTrips['trip_id'])
     validTrips = trips[~in_validTrips]
 
     # Get the valid trips and their times and service days.
-    validTripTimes = pd.merge(pd.merge(validTrips, calendar, on='service_id', how='inner'), smallStopTimes, on='trip_id', how='inner')
+    validTripTimes = pd.merge(pd.merge(validTrips, calendar, on='service_id', how='inner'), first_stop_times, on='trip_id', how='inner')
 
     # Start a DataFrame with all the shape_ids.
     numTripsShape = pd.DataFrame()
@@ -153,6 +157,7 @@ def getNumTrips(folder, trips, stopTimes, calendar):
 
         currentTripsHour = validTripTimes[(validTripTimes.arrival_time >= beginHourString) & (validTripTimes.arrival_time < endHourString)]
 
+        # GTFS allows trips that go over 24:00:00, so account for those.
         if currentHour > 23:
             beginHourStringExt = '{0:0>2}:00:00'.format(currentHour)
             endHourStringExt = '{0:0>2}:00:00'.format((currentHour) +1)
@@ -176,49 +181,36 @@ def getNumTrips(folder, trips, stopTimes, calendar):
             numTripsShape = numTripsShape.append(currentTripsTodayShape.copy())
             numTripsRoute = numTripsRoute.append(currentTripsTodayRoute.copy())
 
+            # See how many shapes and routes are not served at all during the current hour and day.
+            partial_shapes = shape_ids[~shape_ids.isin(currentTripsTodayShape['shape_id'])]
+            partial_routes = route_ids[~route_ids.isin(currentTripsTodayRoute['route_id'])]
+
+            partial_shapes_df = pd.DataFrame(partial_shapes, columns=['shape_id'])
+            partial_shapes_df['size'] = 0
+            partial_shapes_df['day'] = day
+            partial_shapes_df['start_time'] = beginHourString
+
+            partial_routes_df = pd.DataFrame(partial_routes, columns=['route_id'])
+            partial_routes_df['route_size'] = 0
+            partial_routes_df['route_day'] = day
+            partial_routes_df['route_start_time'] = beginHourString
+
+            # Add null trips for these shapes and routes
+            numTripsShape = numTripsShape.append(partial_shapes_df.copy())
+            numTripsRoute = numTripsRoute.append(partial_routes_df.copy())
+
     # Grab only the route trip numbers for weekdays.
     numTripsRouteWeekday = numTripsRoute[numTripsRoute['route_day'].apply(lambda x: x in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'])]
 
-    # Check for shapes and routes that are not served all the time.
-    shape_tf_count = numTripsShape.groupby('shape_id')['shape_id'].count()
-    full_shapes = shape_tf_count[shape_tf_count == base_hourspan * len(daysOfTheWeek)].sort_values()
-    partial_shapes = shape_ids[~shape_ids.isin(full_shapes.index)]
-
-    partial_shapes_df = pd.DataFrame(partial_shapes, columns=['shape_id'])
-    partial_shapes_df['size'] = 0
-    partial_shapes_df['day'] = 'null'
-    partial_shapes_df['start_time'] = 'null'
-    numTripsShape = numTripsShape.append(partial_shapes_df)
-
-    route_tf_count = numTripsRoute.groupby('route_id')['route_id'].count()
-    full_routes = route_tf_count[route_tf_count == base_hourspan * len(daysOfTheWeek)].sort_values()
-    partial_routes = route_ids[~route_ids.isin(full_routes.index)]
-
-    partial_routes_df = pd.DataFrame(partial_routes, columns=['route_id'])
-    partial_routes_df['route_size'] = 0
-    partial_routes_df['route_day'] = 'null'
-    partial_routes_df['route_start_time'] = 'null'
-    numTripsRoute = numTripsRoute.append(partial_routes_df)
-
-    route_tf_count = numTripsRoute.groupby('route_id')['route_id'].count()
-    full_routes_weekday = route_tf_count[route_tf_count == base_hourspan * len(daysOfTheWeek)].sort_values()
-    partial_routes_weekday = route_ids[~route_ids.isin(full_routes_weekday.index)]
-
-    partial_routes_weekday_df = pd.DataFrame(partial_routes_weekday, columns=['route_id'])
-    partial_routes_weekday_df['route_size'] = 0
-    partial_routes_weekday_df['route_day'] = 'null'
-    partial_routes_weekday_df['route_start_time'] = 'null'
-    numTripsRouteWeekday = numTripsRouteWeekday.append(partial_routes_weekday_df)
-
     # Find the lowest number of trips run on a given shape or route during the given time frame.
-    numTripsShape = pd.merge(numTripsShape.sort_values('size').groupby('shape_id').first().reset_index(), shape_w_route_ids, on='shape_id', how='inner')
-    numTripsRoute = numTripsRoute.sort_values('route_size').groupby('route_id').first().reset_index()
-    numTripsRouteWeekday = numTripsRouteWeekday.sort_values('route_size').groupby('route_id').first().reset_index()
+    numTripsFinalShape = pd.merge(numTripsShape.sort_values('size').groupby('shape_id').first().reset_index(), shape_w_route_ids, on='shape_id', how='inner')
+    numTripsFinalRoute = numTripsRoute.sort_values('route_size').groupby('route_id').first().reset_index()
+    numTripsFinalRouteWeekday = numTripsRouteWeekday.sort_values('route_size').groupby('route_id').first().reset_index()
 
-    numTripsRouteWeekday.rename(columns={'route_size':'route_weekday_size'}, inplace=True)
+    numTripsFinalRouteWeekday.rename(columns={'route_size':'route_weekday_size'}, inplace=True)
 
     # Consolidate all information about shapes, routes, and routes on weekdays.
-    numTrips = pd.merge(pd.merge(numTripsShape, numTripsRoute, on='route_id', how='inner'), numTripsRouteWeekday, on='route_id', how='inner')
+    numTrips = pd.merge(pd.merge(numTripsFinalShape, numTripsFinalRoute, on='route_id', how='inner'), numTripsFinalRouteWeekday, on='route_id', how='inner')
 
     # Calculate headways.
     numTrips['max_headway'] = numTrips['size'].apply(lambda x: (60 * base_directions) / x if x != 0 else 121)
@@ -298,7 +290,7 @@ def plotStops(m, folder, min_draw_size):
         m.plot(row['stop_lon'], row['stop_lat'], marker='o', markersize=min_draw_size * .5, markeredgecolor='white', markerfacecolor='black', markeredgewidth=min_draw_size * .125, alpha=.5,latlon=True)
 
 
-def makeFrequentMap(fileName, railFolderList, busFolderList, width_height, lat, lon):
+def makeFrequentMap(fileName, min_draw_size, railFolderList, busFolderList, width_height, lat, lon):
     # Create a map of New York City centered on Manhattan.
     plt.figure(figsize=(36, 36), dpi=72)
     plt.title('1 - New York Transit Frequency')
@@ -329,11 +321,13 @@ def makeFrequentMap(fileName, railFolderList, busFolderList, width_height, lat, 
     print('=' * 50 + '\n')
     #plt.show()
 
-# makeFrequentMap('test.png', [], ['Queens Data'], 80000, 40.730610, -73.935242)
-makeFrequentMap('new_york.png', ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'Westchester Data', 'Nassau Data', 'NJT Bus Data', 'SI Ferry Data'], 80000, 40.730610, -73.935242)
+# makeFrequentMap('test.png', 2, ['Subway Data'], ['Queens Data'], 80000, 40.730610, -73.935242)
 
-# makeFrequentMap('bronx.png', ['Subway Data', 'Metro North Data'], ['Bronx Data', 'Queens Data', 'Manhattan Data', 'MTA Bus Data', 'Westchester Data', 'NJT Bus Data'], 20000, 40.837222, -73.886111)
-# makeFrequentMap('queens.png', ['Subway Data', 'LIRR Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'MTA Bus Data', 'Nassau Data'], 26000, 40.680459, -73.843703)
-# makeFrequentMap('manhattan.png', ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data'], 25000, 40.758611, -73.979167)
-# makeFrequentMap('brooklyn.png', ['Subway Data', 'LIRR Data'], ['Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'SI Ferry Data'], 15000, 40.631111, -73.9525)
-# makeFrequentMap('si.png', ['Subway Data', 'NJT Rail Data'], ['SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data', 'NJT Bus Data'], 25000, 40.576281, -74.144839)
+
+makeFrequentMap('new_york.png', 4, ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'Westchester Data', 'Nassau Data', 'NJT Bus Data', 'SI Ferry Data'], 80000, 40.730610, -73.935242)
+
+# makeFrequentMap('bronx.png', 8, ['Subway Data', 'Metro North Data'], ['Bronx Data', 'Queens Data', 'Manhattan Data', 'MTA Bus Data', 'Westchester Data', 'NJT Bus Data'], 20000, 40.837222, -73.886111)
+# makeFrequentMap('queens.png', 8, ['Subway Data', 'LIRR Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'MTA Bus Data', 'Nassau Data'], 26000, 40.680459, -73.843703)
+# makeFrequentMap('manhattan.png', 8, ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data'], 25000, 40.758611, -73.979167)
+# makeFrequentMap('brooklyn.png', 8, ['Subway Data', 'LIRR Data'], ['Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'SI Ferry Data'], 15000, 40.631111, -73.9525)
+# makeFrequentMap('si.png', 8, ['Subway Data', 'NJT Rail Data'], ['SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data', 'NJT Bus Data'], 25000, 40.576281, -74.144839)
