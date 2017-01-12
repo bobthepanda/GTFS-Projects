@@ -23,7 +23,7 @@ third_maxheadway = 30
 
 # The days of the week to include. Must be in Mon-Sun order. Start date must be a Monday;
 # for best results, use a Monday on a week with no holidays or special service conditions.
-start_date = 20161002
+start_date = 20170123
 daysOfTheWeek = ['monday','tuesday','wednesday','thursday','friday', 'saturday', 'sunday']
 
 base_minhour = base_minhour % 24
@@ -48,32 +48,37 @@ storedStopTimes = {}
 storedCalendar = {}
 storedNumTrips = {}
 
-def getData(folder, shapes, trips, stopTimes, calendar):
-    if folder in storedShapes:
-        print('Retrieving stored data for ' + folder + '.\n')
-        return lists(storedShapes[folder], storedTrips[folder], storedStopTimes[folder], storedCalendar[folder])
-    print('Adding data from ' + folder + '.')
+def getCalendar(folder):
+    ''' Process the calendar for a dataset in a given folder.
+    '''
 
-    # Read the files from the data.
-    readShapes = pd.read_csv('../' + folder + '/shapes.txt')[shapeData]
-    readTrips = pd.read_csv('../' + folder + '/trips.txt')[routeData]
-    readStopTimes = pd.read_csv('../' + folder + '/stop_times.txt')
-    if 'pickup_type' in readStopTimes.columns.values.tolist():
-        readStopTimes = readStopTimes[readStopTimes['pickup_type'] == 0]
-    readStopTimes = readStopTimes[timeData]
     readCalendar = pd.DataFrame()
+
+    # Check if calendar.txt is specified.
     if os.path.isfile('../' + folder + '/calendar.txt'):
-        readCalendar = pd.read_csv('../' + folder + '/calendar.txt')[calendarData]
+        readCalendar = pd.read_csv('../' + folder + '/calendar.txt')
+        daysInWeek = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+
+        # Account for extra/no service specified in calendar dates.
         if os.path.isfile('../' + folder + '/calendar_dates.txt'):
             readCalendarDates = pd.read_csv('../' + folder + '/calendar_dates.txt')
+            # print(readCalendarDates['date'].sort_values().unique())
             calendarDates = readCalendarDates[(readCalendarDates.date >= start_date) & (readCalendarDates.date <= (start_date + 6))]
             dayNum = 0
-            while dayNum < len(daysOfTheWeek):
+            while dayNum < len(daysInWeek):
                 currentDay = calendarDates[(calendarDates.date == (start_date + dayNum))]
-                for row in readCalendar.itertuples():
-                    if len(currentDay[(currentDay.service_id == row.service_id)]):
-                        readCalendar.set_value(row.Index, daysOfTheWeek[dayNum], 0)
+                readCalendar.loc[readCalendar['service_id'].isin(currentDay['service_id']), daysInWeek[dayNum]] = 0
                 dayNum +=1
+
+        # Only count service during the specified timeframe.
+        dayNum = 0
+        while dayNum < len(daysInWeek):
+            readCalendar.loc[(readCalendar['start_date'] > start_date + dayNum) | (readCalendar['end_date'] < start_date + dayNum), daysInWeek[dayNum]] = 0
+            dayNum += 1
+
+        readCalendar = readCalendar[(readCalendar['monday'] != 0) | (readCalendar['tuesday'] != 0) | (readCalendar['wednesday'] != 0) | (readCalendar['thursday'] != 0) | (readCalendar['friday'] != 0) | (readCalendar['saturday'] != 0) | (readCalendar['sunday'] != 0)]
+
+    # If it is not specified, calendar_dates.txt is the source of truth.
     else:
         readCalendarDates = pd.read_csv('../' + folder + '/calendar_dates.txt')[calendarDateData]
         calendarDates = readCalendarDates[(readCalendarDates.date >= start_date) & (readCalendarDates.date <= (start_date + 6))]
@@ -87,6 +92,28 @@ def getData(folder, shapes, trips, stopTimes, calendar):
             for row in readCalendar.itertuples():
                 readCalendar.set_value(row.Index, daysOfTheWeek[dayNum], len(currentDay[(currentDay.service_id == row.service_id)].index))
             dayNum +=1
+
+    
+
+    return readCalendar[calendarData]
+
+def getData(folder, shapes, trips, stopTimes, calendar):
+    ''' Get raw data from dataset in the specified folder.
+    '''
+
+    if folder in storedShapes:
+        print('Retrieving stored data for ' + folder + '.\n')
+        return lists(storedShapes[folder], storedTrips[folder], storedStopTimes[folder], storedCalendar[folder])
+    print('Adding data from ' + folder + '.')
+
+    # Read the files from the data.
+    readShapes = pd.read_csv('../' + folder + '/shapes.txt')[shapeData]
+    readTrips = pd.read_csv('../' + folder + '/trips.txt')[routeData]
+    readStopTimes = pd.read_csv('../' + folder + '/stop_times.txt')
+    if 'pickup_type' in readStopTimes.columns.values.tolist():
+        readStopTimes = readStopTimes[readStopTimes['pickup_type'] == 0]
+    readStopTimes = readStopTimes[timeData]
+    readCalendar = getCalendar(folder)
 
     # Append it to the existing data.
     shapes = pd.concat([shapes, readShapes])
@@ -111,6 +138,8 @@ def getData(folder, shapes, trips, stopTimes, calendar):
     return lists(shapes, trips, stopTimes, calendar)
 
 def getNumWeekdays():
+    ''' Returns the amount of weekdays specified in the configuration settings.
+    '''
     days = 0
     for day in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']:
         if day in daysOfTheWeek:
@@ -118,6 +147,9 @@ def getNumWeekdays():
     return days
 
 def getNumTrips(folder, trips, stopTimes, calendar):
+    ''' Calculate the number of trips for each shape and route.
+    '''
+
     shape_ids = pd.Series(trips['shape_id'].unique())
     route_ids = pd.Series(trips['route_id'].unique())
 
@@ -221,6 +253,8 @@ def getNumTrips(folder, trips, stopTimes, calendar):
     return numTrips
 
 def baseline_headway(x):
+    ''' Set the baseline headway,
+    '''
     x = round(x)
     if x <= base_maxheadway:
         return base_maxheadway
@@ -234,6 +268,9 @@ def baseline_headway(x):
         return x
 
 def plotData(m, folder, minsize):
+    ''' For the given folder, plot onto m using the specified minsize.
+    '''
+
     shapes = pd.DataFrame()
     trips = pd.DataFrame()
     stopTimes = pd.DataFrame()
@@ -254,6 +291,9 @@ def plotData(m, folder, minsize):
     return numTrips_csv
 
 def plotDataOnMap(m, shapes, numTrips, min_draw_size):
+    ''' Actually draw on the map using computed numTrips data.
+    '''
+
     # Map the routes, with transparency dependent on frequency.
     for row in numTrips.itertuples():
         shape_id = row.shape_id
@@ -283,6 +323,8 @@ def plotDataOnMap(m, shapes, numTrips, min_draw_size):
         m.plot(currentShape['shape_pt_lon'].values, currentShape['shape_pt_lat'].values, color=color, latlon=True, linewidth=min_draw_size * width, alpha=base_transp * transp)
 
 def plotStops(m, folder, min_draw_size):
+    ''' Plot the stops from a dataset in a folder at the min_draw_size.
+    '''
     stops = pd.read_csv('../' + folder + '/stops.txt')[stopData]
 
     # Make cute little stop circles for the stops.
@@ -291,6 +333,8 @@ def plotStops(m, folder, min_draw_size):
 
 
 def makeFrequentMap(fileName, min_draw_size, railFolderList, busFolderList, width_height, lat, lon):
+    ''' Generate a frequent map. '''
+
     # Create a map of New York City centered on Manhattan.
     plt.figure(figsize=(36, 36), dpi=72)
     plt.title('1 - New York Transit Frequency')
@@ -321,13 +365,12 @@ def makeFrequentMap(fileName, min_draw_size, railFolderList, busFolderList, widt
     print('=' * 50 + '\n')
     #plt.show()
 
-# makeFrequentMap('test.png', 2, ['Subway Data'], ['Queens Data'], 80000, 40.730610, -73.935242)
-
+# makeFrequentMap('test.png', 2, [], ['Queens Data'], 80000, 40.730610, -73.935242)
 
 makeFrequentMap('new_york.png', 4, ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'Westchester Data', 'Nassau Data', 'NJT Bus Data', 'SI Ferry Data'], 80000, 40.730610, -73.935242)
 
-# makeFrequentMap('bronx.png', 8, ['Subway Data', 'Metro North Data'], ['Bronx Data', 'Queens Data', 'Manhattan Data', 'MTA Bus Data', 'Westchester Data', 'NJT Bus Data'], 20000, 40.837222, -73.886111)
-# makeFrequentMap('queens.png', 8, ['Subway Data', 'LIRR Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'MTA Bus Data', 'Nassau Data'], 26000, 40.680459, -73.843703)
-# makeFrequentMap('manhattan.png', 8, ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data'], 25000, 40.758611, -73.979167)
-# makeFrequentMap('brooklyn.png', 8, ['Subway Data', 'LIRR Data'], ['Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'SI Ferry Data'], 15000, 40.631111, -73.9525)
-# makeFrequentMap('si.png', 8, ['Subway Data', 'NJT Rail Data'], ['SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data', 'NJT Bus Data'], 25000, 40.576281, -74.144839)
+makeFrequentMap('bronx.png', 8, ['Subway Data', 'Metro North Data'], ['Bronx Data', 'Queens Data', 'Manhattan Data', 'MTA Bus Data', 'Westchester Data', 'NJT Bus Data'], 20000, 40.837222, -73.886111)
+makeFrequentMap('queens.png', 8, ['Subway Data', 'LIRR Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'MTA Bus Data', 'Nassau Data'], 26000, 40.680459, -73.843703)
+makeFrequentMap('manhattan.png', 8, ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data'], 25000, 40.758611, -73.979167)
+makeFrequentMap('brooklyn.png', 8, ['Subway Data', 'LIRR Data'], ['Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'SI Ferry Data'], 15000, 40.631111, -73.9525)
+makeFrequentMap('si.png', 8, ['Subway Data', 'NJT Rail Data'], ['SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data', 'NJT Bus Data'], 25000, 40.576281, -74.144839)
