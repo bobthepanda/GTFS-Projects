@@ -339,6 +339,7 @@ def makeFrequentMap(fileName, min_draw_size, railFolderList, busFolderList, widt
     plt.figure(figsize=(36, 36), dpi=72)
     plt.title('1 - New York Transit Frequency')
     map = Basemap(resolution="h", projection="stere", width=width_height, height=width_height, lon_0=lon, lat_0=lat)
+    map.readshapefile('../Shapefiles/nybb', 'nybb')
     numTrips = pd.DataFrame()
 
     numProcessed = 0
@@ -365,12 +366,12 @@ def makeFrequentMap(fileName, min_draw_size, railFolderList, busFolderList, widt
     print('=' * 50 + '\n')
     #plt.show()
 
-# makeFrequentMap('test.png', 2, [], ['Queens Data'], 80000, 40.730610, -73.935242)
+makeFrequentMap('test.png', 2, [], ['Queens Data'], 80000, 40.730610, -73.935242)
 
-makeFrequentMap('new_york.png', 4, ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'Westchester Data', 'Nassau Data', 'NJT Bus Data', 'SI Ferry Data'], 80000, 40.730610, -73.935242)
+# makeFrequentMap('new_york.png', 4, ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'Westchester Data', 'Nassau Data', 'NJT Bus Data', 'SI Ferry Data'], 80000, 40.730610, -73.935242)
 
-makeFrequentMap('bronx.png', 8, ['Subway Data', 'Metro North Data'], ['Bronx Data', 'Queens Data', 'Manhattan Data', 'MTA Bus Data', 'Westchester Data', 'NJT Bus Data'], 20000, 40.837222, -73.886111)
-makeFrequentMap('queens.png', 8, ['Subway Data', 'LIRR Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'MTA Bus Data', 'Nassau Data'], 26000, 40.680459, -73.843703)
-makeFrequentMap('manhattan.png', 8, ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data'], 25000, 40.758611, -73.979167)
-makeFrequentMap('brooklyn.png', 8, ['Subway Data', 'LIRR Data'], ['Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'SI Ferry Data'], 15000, 40.631111, -73.9525)
-makeFrequentMap('si.png', 8, ['Subway Data', 'NJT Rail Data'], ['SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data', 'NJT Bus Data'], 25000, 40.576281, -74.144839)
+# makeFrequentMap('bronx.png', 8, ['Subway Data', 'Metro North Data'], ['Bronx Data', 'Queens Data', 'Manhattan Data', 'MTA Bus Data', 'Westchester Data', 'NJT Bus Data'], 20000, 40.837222, -73.886111)
+# makeFrequentMap('queens.png', 8, ['Subway Data', 'LIRR Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'MTA Bus Data', 'Nassau Data'], 26000, 40.680459, -73.843703)
+# makeFrequentMap('manhattan.png', 8, ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data'], 25000, 40.758611, -73.979167)
+# makeFrequentMap('brooklyn.png', 8, ['Subway Data', 'LIRR Data'], ['Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'SI Ferry Data'], 15000, 40.631111, -73.9525)
+# makeFrequentMap('si.png', 8, ['Subway Data', 'NJT Rail Data'], ['SI Data', 'MTA Bus Data', 'NJT Bus Data', 'SI Ferry Data', 'NJT Bus Data'], 25000, 40.576281, -74.144839)
