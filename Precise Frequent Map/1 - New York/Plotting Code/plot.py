@@ -95,8 +95,6 @@ def getCalendar(folder):
                 readCalendar.set_value(row.Index, daysOfTheWeek[dayNum], len(currentDay[(currentDay.service_id == row.service_id)].index))
             dayNum +=1
 
-    
-
     return readCalendar[calendarData]
 
 def getData(folder, shapes, trips, stopTimes, calendar):
@@ -270,7 +268,7 @@ def baseline_headway(x):
     else:
         return x
 
-def plotData(m, folder, minsize):
+def plotData(m, folder, minsize, color_var):
     ''' For the given folder, plot onto m using the specified minsize.
     '''
 
@@ -289,19 +287,22 @@ def plotData(m, folder, minsize):
     os.makedirs("csv",exist_ok=True)
     numTrips_csv = numTrips[['route_id', 'headway_tier', 'weekday_headway_tier', 'max_route_headway', 'max_route_weekday_headway']].groupby('route_id').first().reset_index().round(2)
     numTrips_csv.sort_values(['headway_tier', 'weekday_headway_tier', 'route_id']).to_csv(path_or_buf=("csv/" + folder.replace(" ", "") + 'RouteData.csv'))
-    plotDataOnMap(m, shapes, numTrips, minsize)
+    plotDataOnMap(m, shapes, numTrips, minsize, color_var)
 
     return numTrips_csv
 
-def plotDataOnMap(m, shapes, numTrips, min_draw_size):
+def plotDataOnMap(m, shapes, numTrips, min_draw_size, color_var):
     ''' Actually draw on the map using computed numTrips data.
     '''
+
+    # numTrips = numTrips.sort_values(['max_route_headway', 'max_headway']).groupby('route_id').head(10).reset_index(drop=True)
 
     # Map the routes, with transparency dependent on frequency.
     for row in numTrips.itertuples():
         shape_id = row.shape_id
         headway = row.max_headway
         route_headway = row.max_route_headway
+        route_weekday_headway = row.max_route_weekday_headway
         currentShape = shapes[shapes['shape_id'] == shape_id]
 
         base_transp = 1
@@ -314,16 +315,27 @@ def plotDataOnMap(m, shapes, numTrips, min_draw_size):
 
         if width >= 1:
             width = 1
+            color = 'red'
         elif (width >= base_maxheadway / second_maxheadway):
             width = .5
+            if base_maxheadway / route_weekday_headway >= 1:
+                color = 'magenta'
+            else:
+                color = 'blue'
         elif (width >= base_maxheadway / third_maxheadway):
             width = .25
+            color = 'orange'
         elif (width >= base_maxheadway / 60):
             width = .125
+            color = 'orange'
         else:
             width = .01
+            color = 'grey'
 
-        m.plot(currentShape['shape_pt_lon'].values, currentShape['shape_pt_lat'].values, color=color, latlon=True, linewidth=min_draw_size * width, alpha=base_transp * transp)
+        if not color_var:
+            color = 'black'
+
+        m.plot(currentShape['shape_pt_lon'].values, currentShape['shape_pt_lat'].values, label=shape_id, color=color, latlon=True, linewidth=min_draw_size * width, alpha=base_transp * transp)
 
 def plotStops(m, folder, min_draw_size):
     ''' Plot the stops from a dataset in a folder at the min_draw_size.
@@ -352,14 +364,14 @@ def makeFrequentMap(fileName, min_draw_size, railFolderList, busFolderList, widt
     for folder in railFolderList:
         if numProcessed > 0:
             print('-' * 50 + '\n')
-        numTrips = numTrips.append(plotData(m, folder, min_draw_size * 2))
+        numTrips = numTrips.append(plotData(m, folder, min_draw_size * 2, False))
         numProcessed += 1
 
     # Plot bus routes.
     for folder in busFolderList:
         if numProcessed > 0:
             print('-' * 50 + '\n')
-        numTrips = numTrips.append(plotData(m, folder, min_draw_size))
+        numTrips = numTrips.append(plotData(m, folder, min_draw_size, True))
         numProcessed += 1
 
     for folder in railFolderList:
@@ -370,7 +382,7 @@ def makeFrequentMap(fileName, min_draw_size, railFolderList, busFolderList, widt
     print('=' * 50 + '\n')
     #plt.show()
 
-# makeFrequentMap('test.svg', 2, [], ['NJT Bus Data'], 80000, 40.730610, -73.935242)
+# makeFrequentMap('test.svg', 2, [], ['Queens Data'], 80000, 40.730610, -73.935242)
 
 makeFrequentMap('new_york.svg', 4, ['PATH Data', 'Subway Data', 'LIRR Data', 'Metro North Data', 'NJT Rail Data'], ['Bronx Data', 'Queens Data', 'Brooklyn Data', 'Manhattan Data', 'SI Data', 'MTA Bus Data', 'Westchester Data', 'Nassau Data', 'NJT Bus Data', 'SI Ferry Data'], 80000, 40.730610, -73.935242)
 
