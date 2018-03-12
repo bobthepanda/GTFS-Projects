@@ -1,2 +1,2 @@
 ,route_id,headway_tier,weekday_headway_tier,max_route_headway,max_route_weekday_headway
-0,SIF,121,121,121,121
+0,SIF,60,30,40.0,30.0
